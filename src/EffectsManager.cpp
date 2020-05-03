@@ -39,6 +39,18 @@
 #include "effects/basic/TrackingLightersEffect.h"
 #include "effects/basic/LightBallsEffect.h"
 #include "effects/basic/MovingCubeEffect.h"
+#include "effects/basic/WhiteColorEffect.h"
+
+#include "effects/fractional/PulsingCometEffect.h"
+#include "effects/fractional/DoubleCometsEffect.h"
+#include "effects/fractional/TripleCometsEffect.h"
+#include "effects/fractional/RainbowCometEffect.h"
+#include "effects/fractional/ColorCometEffect.h"
+#include "effects/fractional/MovingFlameEffect.h"
+#include "effects/fractional/FractorialFireEffect.h"
+#include "effects/fractional/RainbowKiteEffect.h"
+
+#include "effects/basic/BouncingBallsEffect.h"
 
 #include <map>
 
@@ -233,4 +245,14 @@ EffectsManager::EffectsManager()
     effectsMap[PSTR("TrackingLightersEffect")] = new TrackingLightersEffect();
     effectsMap[PSTR("LightBallsEffect")] = new LightBallsEffect();
     effectsMap[PSTR("MovingCubeEffect")] = new MovingCubeEffect();
+    effectsMap[PSTR("WhiteColorEffect")] = new WhiteColorEffect();
+    effectsMap[PSTR("PulsingCometEffect")] = new PulsingCometEffect();
+    effectsMap[PSTR("DoubleCometsEffect")] = new DoubleCometsEffect();
+    effectsMap[PSTR("TripleCometsEffect")] = new TripleCometsEffect();
+    effectsMap[PSTR("RainbowCometEffect")] = new RainbowCometEffect();
+    effectsMap[PSTR("ColorCometEffect")] = new ColorCometEffect();
+    effectsMap[PSTR("MovingFlameEffect")] = new MovingFlameEffect();
+    effectsMap[PSTR("FractorialFireEffect")] = new FractorialFireEffect();
+    effectsMap[PSTR("RainbowKiteEffect")] = new RainbowKiteEffect();
+    effectsMap[PSTR("BouncingBallsEffect")] = new BouncingBallsEffect();
 }
