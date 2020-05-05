@@ -316,6 +316,76 @@
       "brightness": 80
     },
     {
+      "id": "MetaBallsEffect",
+      "name": "Meta Balls",
+      "speed": 100,
+      "scale": 20,
+      "brightness": 80
+    },
+    {
+      "id": "SinusoidEffect",
+      "name": "Sinusoid",
+      "speed": 100,
+      "scale": 20,
+      "brightness": 80
+    },
+    {
+      "id": "WaterfallPaletteEffect",
+      "name": "Waterfall Pallete",
+      "speed": 100,
+      "scale": 20,
+      "brightness": 80
+    },
+    {
+      "id": "RainEffect",
+      "name": "Rain",
+      "speed": 100,
+      "scale": 20,
+      "brightness": 80
+    },
+    {
+      "id": "PrismataEffect",
+      "name": "Prismata",
+      "speed": 100,
+      "scale": 20,
+      "brightness": 80
+    },
+    {
+      "id": "FlockEffect",
+      "name": "Flock",
+      "speed": 100,
+      "scale": 20,
+      "brightness": 80
+    },
+    {
+      "id": "WhirlEffect",
+      "name": "Whirl",
+      "speed": 100,
+      "scale": 20,
+      "brightness": 80
+    },
+    {
+      "id": "WaveEffect",
+      "name": "Wave",
+      "speed": 100,
+      "scale": 20,
+      "brightness": 80
+    },
+    {
+      "id": "Fire12Effect",
+      "name": "Fire12",
+      "speed": 100,
+      "scale": 20,
+      "brightness": 80
+    },
+    {
+      "id": "Fire18Effect",
+      "name": "Fire18",
+      "speed": 100,
+      "scale": 20,
+      "brightness": 80
+    },
+    {
       "id": "SoundStereoEffect",
       "name": "Sound stereo spectrometer",
       "speed": 1,

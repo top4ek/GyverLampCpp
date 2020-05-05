@@ -16,7 +16,7 @@
 
 namespace {
 
-const size_t jsonSerializeSize = 512 * 20;
+const size_t jsonSerializeSize = 512 * 22;
 
 Settings *instance = nullptr;
 
@@ -90,25 +90,6 @@ void Settings::Save()
 
     if (file) {
         file.close();
-    }
-}
-
-void Settings::WriteConfigTo(AsyncWebSocket *socket, AsyncWebSocketClient *client)
-{
-    DynamicJsonDocument json(jsonSerializeSize);
-    JsonObject root = json.to<JsonObject>();
-    BuildJson(root);
-
-    size_t configSize = measureJson(json);
-    AsyncWebSocketMessageBuffer *buffer = socket->makeBuffer(configSize);
-    if (!buffer) {
-        return;
-    }
-    serializeJson(json, (char *)buffer->get(), configSize + 1);
-    if (client) {
-        client->text(buffer);
-    } else {
-        socket->textAll(buffer);
     }
 }
 

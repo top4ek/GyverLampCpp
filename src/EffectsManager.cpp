@@ -52,6 +52,18 @@
 
 #include "effects/basic/BouncingBallsEffect.h"
 #include "effects/basic/SpiralEffect.h"
+#include "effects/basic/MetaBallsEffect.h"
+#include "effects/basic/SinusoidEffect.h"
+#include "effects/basic/WaterfallPaletteEffect.h"
+#include "effects/basic/RainEffect.h"
+#include "effects/basic/PrismataEffect.h"
+
+#include "effects/aurora/FlockEffect.h"
+#include "effects/aurora/WhirlEffect.h"
+#include "effects/aurora/WaveEffect.h"
+
+#include "effects/basic/Fire12Effect.h"
+#include "effects/basic/Fire18Effect.h"
 
 #include <map>
 
@@ -257,4 +269,14 @@ EffectsManager::EffectsManager()
     effectsMap[PSTR("RainbowKiteEffect")] = new RainbowKiteEffect();
     effectsMap[PSTR("BouncingBallsEffect")] = new BouncingBallsEffect();
     effectsMap[PSTR("SpiralEffect")] = new SpiralEffect();
+    effectsMap[PSTR("MetaBallsEffect")] = new MetaBallsEffect();
+    effectsMap[PSTR("SinusoidEffect")] = new SinusoidEffect();
+    effectsMap[PSTR("WaterfallPaletteEffect")] = new WaterfallPaletteEffect();
+    effectsMap[PSTR("RainEffect")] = new RainEffect();
+    effectsMap[PSTR("PrismataEffect")] = new PrismataEffect();
+    effectsMap[PSTR("FlockEffect")] = new FlockEffect();
+    effectsMap[PSTR("WhirlEffect")] = new WhirlEffect();
+    effectsMap[PSTR("WaveEffect")] = new WaveEffect();
+    effectsMap[PSTR("Fire12Effect")] = new Fire12Effect();
+    effectsMap[PSTR("Fire18Effect")] = new Fire18Effect();
 }
