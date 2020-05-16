@@ -54,7 +54,7 @@ void onWsEvent(AsyncWebSocket * server, AsyncWebSocketClient * client, AwsEventT
         Serial.printf_P(PSTR("ws[%s][%u] connect\n"), server->url(), client->id());
         //        client->printf("Hello Client %u :)", client->id());
         client->ping();
-        lampWebServer->SendConfig(server, client);
+        lampWebServer->SendConfig();
     } else if (type == WS_EVT_DISCONNECT) {
         Serial.printf_P(PSTR("ws[%s][%u] disconnect\n"), server->url(), client->id());
     } else if (type == WS_EVT_ERROR) {
@@ -88,6 +88,7 @@ void onWsEvent(AsyncWebSocket * server, AsyncWebSocketClient * client, AwsEventT
             if (info->opcode == WS_TEXT) {
                 //                client->text("I got your text message");
                 parseTextMessage(msg);
+                lampWebServer->SendConfig();
             } else {
                 //                client->binary("I got your binary message");
                 Serial.println(F("Received binary message"));
@@ -142,6 +143,7 @@ void onWsEvent(AsyncWebSocket * server, AsyncWebSocketClient * client, AwsEventT
                     if (info->message_opcode == WS_TEXT) {
                         //                        client->text("I got your text message");
                         parseTextMessage(msg);
+                        lampWebServer->SendConfig();
                     } else {
                         //                        client->binary("I got your binary message");
                         Serial.println(F("Received binary message"));
@@ -183,21 +185,31 @@ void updateRequestHandler(AsyncWebServerRequest *request)
 
 void updateHandler(uint8_t *data, size_t len, size_t index, size_t total, bool final)
 {
-    static File settings;
+    static File json;
     if (index == 0) {
         isUpdatingFlag = true;
         Serial.println(F("Update started!"));
         FastLED.clear();
         if (data[0] == '{') {
-            if (settings) {
-                settings.close();
+            if (json) {
+                json.close();
             }
-            settings = SPIFFS.open("/settings.json", "w");
-            if (!settings) {
+            json = SPIFFS.open("/settings.json", "w");
+            if (!json) {
                 Serial.println(F("SPIFFS Error opening settings file for write"));
                 return;
             }
             Serial.println(F("Uploading settings started!"));
+        } else if (data[0] == '[') {
+            if (json) {
+                json.close();
+            }
+            json = SPIFFS.open("/effects.json", "w");
+            if (!json) {
+                Serial.println(F("SPIFFS Error opening effects file for write"));
+                return;
+            }
+            Serial.println(F("Uploading effects started!"));
         } else {
             int command = U_FLASH;
             if (data[0] == 0) {
@@ -224,8 +236,8 @@ void updateHandler(uint8_t *data, size_t len, size_t index, size_t total, bool f
         myMatrix->setTextWrap(false);
     }
     drawProgress(index + len);
-    if (settings) {
-        settings.write(data, len);
+    if (json) {
+        json.write(data, len);
     } else if (Update.write(data, len) != len) {
         Update.printError(Serial);
         myMatrix->fill(CRGB::Red, true);
@@ -233,8 +245,8 @@ void updateHandler(uint8_t *data, size_t len, size_t index, size_t total, bool f
         return;
     }
     if (final) {
-        if (settings) {
-            settings.close();
+        if (json) {
+            json.close();
         } else if (!Update.end(true)) {
             Update.printError(Serial);
             myMatrix->fill(CRGB::Red, true);
@@ -333,18 +345,14 @@ void LampWebServer::Process()
     }
 }
 
-void SendJsonToWs(const DynamicJsonDocument &json, AsyncWebSocketClient *client = nullptr)
+void SendJsonToWs(const DynamicJsonDocument &json)
 {
     String buffer;
     serializeJson(json, buffer);
-    if (client) {
-        client->text(buffer);
-    } else {
-        socket->textAll(buffer);
-    }
+    socket->textAll(buffer);
 }
 
-void LampWebServer::SendConfig(AsyncWebSocket *server, AsyncWebSocketClient *client)
+void LampWebServer::SendConfig()
 {
     if (!socket) {
         return;
@@ -358,7 +366,10 @@ void LampWebServer::SendConfig(AsyncWebSocket *server, AsyncWebSocketClient *cli
     JsonObject root = json.to<JsonObject>();
     root[F("activeEffect")] = effectsManager->ActiveEffectIndex();
     root[F("working")] = mySettings->generalSettings.working;
-    SendJsonToWs(json, client);
+    SendJsonToWs(json);
+
+    serializeJsonPretty(json, Serial);
+    Serial.println();
 }
 
 bool LampWebServer::isUpdating()
@@ -373,7 +384,7 @@ void LampWebServer::onConnected(void (*func)(bool))
 
 void LampWebServer::Update()
 {
-    SendConfig(socket, nullptr);
+    SendConfig();
 }
 
 void LampWebServer::configureHandlers()

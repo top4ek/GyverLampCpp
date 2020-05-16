@@ -67,6 +67,8 @@
 #include "effects/basic/RainNeoEffect.h"
 #include "effects/basic/TwinklesEffect.h"
 
+#include "effects/network/DMXEffect.h"
+
 #include <map>
 
 namespace  {
@@ -202,6 +204,25 @@ void EffectsManager::UpdateCurrentSettings(const JsonObject &json)
     myMatrix->setBrightness(activeEffect()->settings.brightness);
 }
 
+void EffectsManager::UpdateSettingsById(const String &id, const JsonObject &json)
+{
+    for (size_t index = 0; index < effects.size(); index++) {
+        Effect *effect = effects[index];
+        if (effect->settings.id == id) {
+            if (effect != effects[activeIndex]) {
+                activeEffect()->deactivate();
+                myMatrix->clear();
+                activeIndex = index;
+                ActivateEffect(activeIndex);
+            }
+            effect->initialize(json);
+            break;
+        }
+    }
+    myMatrix->setBrightness(activeEffect()->settings.brightness);
+    mySettings->SaveLater();
+}
+
 uint8_t EffectsManager::Count()
 {
     return static_cast<uint8_t>(effects.size());
@@ -247,10 +268,8 @@ EffectsManager::EffectsManager()
     effectsMap[PSTR("ClockHorizontal1")] = new ClockHorizontal1Effect();
     effectsMap[PSTR("ClockHorizontal2")] = new ClockHorizontal2Effect();
     effectsMap[PSTR("ClockHorizontal3")] = new ClockHorizontal3Effect();
-    effectsMap[PSTR("Sound")] = new SoundEffect();
     effectsMap[PSTR("Starfall")] = new StarfallEffect();
     effectsMap[PSTR("DiagonalRainbow")] = new DiagonalRainbowEffect();
-    effectsMap[PSTR("SoundStereo")] = new SoundStereoEffect();
     effectsMap[PSTR("Waterfall")] = new WaterfallEffect();
     effectsMap[PSTR("TwirlRainbow")] = new TwirlRainbowEffect();
     effectsMap[PSTR("PulseCircles")] = new PulseCirclesEffect();
@@ -287,4 +306,5 @@ EffectsManager::EffectsManager()
     // Uncomment to use
     // effectsMap[PSTR("Sound")] = new SoundEffect();
     // effectsMap[PSTR("Stereo")] = new SoundStereoEffect();
+    effectsMap[PSTR("DMX")] = new DMXEffect();
 }

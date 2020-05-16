@@ -70,6 +70,7 @@ void Settings::Process()
 
 void Settings::SaveLater()
 {
+    lampWebServer->Update();
     settingsChanged = true;
     settingsSaveTimer = millis();
 }
@@ -131,7 +132,6 @@ void Settings::ProcessConfig(const String &message)
     const String event = doc[F("event")];
     if (event == F("WORKING")) {
         const bool working = doc[F("data")];
-
         Serial.printf_P(PSTR("working: %s\n"), working ? PSTR("true") : PSTR("false"));
         mySettings->generalSettings.working = working;
     } else if (event == F("ACTIVE_EFFECT")) {
@@ -139,7 +139,12 @@ void Settings::ProcessConfig(const String &message)
         effectsManager->ChangeEffect(static_cast<uint8_t>(index));
     } else if (event == F("EFFECTS_CHANGED")) {
         const JsonObject effect = doc[F("data")];
-        effectsManager->UpdateCurrentSettings(effect);
+        const String id = effect[F("i")];
+        if (id == effectsManager->activeEffect()->settings.id) {
+            effectsManager->UpdateCurrentSettings(effect);
+        } else {
+            effectsManager->UpdateSettingsById(id, effect);
+        }
         SaveLater();
     } else if (event == F("ALARMS_CHANGED")) {
 
@@ -257,6 +262,26 @@ void Settings::ReadSettings()
        }
     }
 
+    if (root.containsKey(F("button"))) {
+       JsonObject buttonObject = root[F("button")];
+       if (buttonObject.containsKey(F("pin"))) {
+           uint8_t btnPin = buttonObject[F("pin")];
+           if (btnPin != 0) {
+               buttonSettings.pin = btnPin;
+           }
+       }
+       if (buttonObject.containsKey(F("type"))) {
+           buttonSettings.type = buttonObject[F("type")];
+       }
+       if (buttonObject.containsKey(F("state"))) {
+           buttonSettings.state = buttonObject[F("state")];
+       }
+    }
+
+    if (root.containsKey(F("logInterval"))) {
+        generalSettings.logInterval = root[F("logInterval")];
+    }
+
     if (root.containsKey(F("activeEffect"))) {
         generalSettings.activeEffect = root[F("activeEffect")];
     }
@@ -296,6 +321,7 @@ void Settings::ReadEffects()
 void Settings::BuildSettingsJson(JsonObject &root)
 {
     root[F("activeEffect")] = effectsManager->ActiveEffectIndex();
+    root[F("logInterval")] = generalSettings.logInterval;
     root[F("working")] = generalSettings.working;
 
     JsonObject matrixObject = root.createNestedObject(F("matrix"));
@@ -355,7 +381,4 @@ Settings::Settings(uint32_t saveInterval)
     connectionSettings.apName = F("Fire Lamp");
     connectionSettings.ntpServer = F("europe.pool.ntp.org");
     connectionSettings.manufacturer = F("coderus");
-
-    ReadSettings();
-    ReadEffects();
 }

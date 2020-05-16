@@ -163,6 +163,15 @@ uint8_t MyMatrix::GetCenterY()
     return mySettings->matrixSettings.height / 2 - 1;
 }
 
+uint8_t MyMatrix::GetDimension()
+{
+    if (type & NEO_MATRIX_ROWS) {
+        return width();
+    } else {
+        return height();
+    }
+}
+
 CRGB *MyMatrix::GetLeds()
 {
     return leds;
@@ -250,7 +259,7 @@ uint8_t MyMatrix::wrapY(int8_t y)
 void MyMatrix::fader(uint8_t step)
 {
     for (uint8_t x = 0; x < width(); x++) {
-        for (uint8_t y = 0U; y < height(); y++) {
+        for (uint8_t y = 0; y < height(); y++) {
             fadePixel(x, y, step);
         }
     }
@@ -263,12 +272,12 @@ void MyMatrix::fadePixel(uint8_t x, uint8_t y, uint8_t step)
         return;
     }
 
-    if (leds[pixelNum].r >= 30U ||
-            leds[pixelNum].g >= 30U ||
-            leds[pixelNum].b >= 30U) {
+    if (leds[pixelNum].r >= 30 ||
+            leds[pixelNum].g >= 30 ||
+            leds[pixelNum].b >= 30) {
         leds[pixelNum].fadeToBlackBy(step);
     } else {
-        leds[pixelNum] = 0U;
+        leds[pixelNum] = 0;
     }
 }
 
