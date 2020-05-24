@@ -16,9 +16,9 @@
 
 namespace {
 
-const size_t jsonSerializeSize = 512 * 20;
+const size_t serializeSize = 512 * 20;
 
-Settings *instance = nullptr;
+Settings *object = nullptr;
 
 bool settingsChanged = false;
 uint32_t settingsSaveTimer = 0;
@@ -27,24 +27,7 @@ uint32_t settingsSaveInterval = 3000;
 const char* settingsFileName PROGMEM = "/settings.json";
 const char* effectsFileName PROGMEM = "/effects.json";
 
-} // namespace
-
-Settings *Settings::Instance()
-{
-    return instance;
-}
-
-void Settings::Initialize(uint32_t saveInterval)
-{
-    if (instance) {
-        return;
-    }
-
-    Serial.println(F("Initializing Settings"));
-    instance = new Settings(saveInterval);
-}
-
-String Settings::GetUniqueID()
+String GetUniqueID()
 {
 #if defined(ESP32)
   return String((uint32_t)ESP.getEfuseMac(), HEX);
@@ -53,39 +36,57 @@ String Settings::GetUniqueID()
 #endif
 }
 
-size_t Settings::JsonSerializeSize()
+} // namespace
+
+Settings *Settings::instance()
 {
-    return jsonSerializeSize;
+    return object;
 }
 
-void Settings::Process()
+void Settings::Initialize(uint32_t saveInterval)
+{
+    if (object) {
+        return;
+    }
+
+    Serial.println(F("Initializing Settings"));
+    object = new Settings(saveInterval);
+}
+
+size_t Settings::jsonSerializeSize()
+{
+    return serializeSize;
+}
+
+void Settings::loop()
 {
     if (settingsChanged && (millis() - settingsSaveTimer) > settingsSaveInterval) {
         settingsChanged = false;
         settingsSaveTimer = millis();
-        SaveSettings();
-        SaveEffects();
+        saveSettings();
+        saveEffects();
     }
 }
 
-void Settings::SaveLater()
+void Settings::saveLater()
 {
-    lampWebServer->Update();
+    lampWebServer->update();
     settingsChanged = true;
     settingsSaveTimer = millis();
 }
 
-void Settings::SaveSettings()
+void Settings::saveSettings()
 {
+    Serial.print(F("Saving settings... "));
     File file = SPIFFS.open(settingsFileName, "w");
     if (!file) {
         Serial.println(F("Error opening settings file from SPIFFS!"));
         return;
     }
 
-    DynamicJsonDocument json(jsonSerializeSize);
+    DynamicJsonDocument json(serializeSize);
     JsonObject root = json.to<JsonObject>();
-    BuildSettingsJson(root);
+    buildSettingsJson(root);
 
     if (serializeJson(json, file) == 0) {
         Serial.println(F("Failed to write settings to file"));
@@ -94,19 +95,21 @@ void Settings::SaveSettings()
     if (file) {
         file.close();
     }
+    Serial.println(F("Done!"));
 }
 
-void Settings::SaveEffects()
+void Settings::saveEffects()
 {
+    Serial.print(F("Saving effects... "));
     File file = SPIFFS.open(effectsFileName, "w");
     if (!file) {
         Serial.println(F("Error opening effects file from SPIFFS!"));
         return;
     }
 
-    DynamicJsonDocument json(jsonSerializeSize);
+    DynamicJsonDocument json(serializeSize);
     JsonArray root = json.to<JsonArray>();
-    BuildEffectsJson(root);
+    buildEffectsJson(root);
 
     if (serializeJson(json, file) == 0) {
         Serial.println(F("Failed to write effects to file"));
@@ -115,16 +118,17 @@ void Settings::SaveEffects()
     if (file) {
         file.close();
     }
+    Serial.println(F("Done!"));
 }
 
-void Settings::WriteEffectsMqtt(JsonArray &array)
+void Settings::writeEffectsMqtt(JsonArray &array)
 {
     for (Effect *effect : effectsManager->effects) {
         array.add(effect->settings.name);
     }
 }
 
-void Settings::ProcessConfig(const String &message)
+void Settings::processConfig(const String &message)
 {
     DynamicJsonDocument doc(512);
     deserializeJson(doc, message);
@@ -136,16 +140,16 @@ void Settings::ProcessConfig(const String &message)
         mySettings->generalSettings.working = working;
     } else if (event == F("ACTIVE_EFFECT")) {
         const int index = doc[F("data")];
-        effectsManager->ChangeEffect(static_cast<uint8_t>(index));
+        effectsManager->activateEffect(static_cast<uint8_t>(index));
     } else if (event == F("EFFECTS_CHANGED")) {
         const JsonObject effect = doc[F("data")];
         const String id = effect[F("i")];
         if (id == effectsManager->activeEffect()->settings.id) {
-            effectsManager->UpdateCurrentSettings(effect);
+            effectsManager->updateCurrentSettings(effect);
         } else {
-            effectsManager->UpdateSettingsById(id, effect);
+            effectsManager->updateSettingsById(id, effect);
         }
-        SaveLater();
+        saveLater();
     } else if (event == F("ALARMS_CHANGED")) {
 
     }
@@ -153,7 +157,7 @@ void Settings::ProcessConfig(const String &message)
     mqtt->update();
 }
 
-void Settings::ProcessCommandMqtt(const JsonObject &json)
+void Settings::processCommandMqtt(const JsonObject &json)
 {
     if (json.containsKey(F("state"))) {
         const String state = json[F("state")];
@@ -161,20 +165,20 @@ void Settings::ProcessCommandMqtt(const JsonObject &json)
     }
     if (json.containsKey(F("effect"))) {
         const String effect = json[F("effect")];
-        effectsManager->ChangeEffectByName(effect);
+        effectsManager->changeEffectByName(effect);
     }
-    effectsManager->UpdateCurrentSettings(json);
-    SaveLater();
+    effectsManager->updateCurrentSettings(json);
+    saveLater();
 
-    lampWebServer->Update();
+    lampWebServer->update();
 }
 
-void Settings::ReadSettings()
+void Settings::readSettings()
 {
     bool settingsExists = SPIFFS.exists(settingsFileName);
     Serial.printf_P(PSTR("SPIFFS Settings file exists: %s\n"), settingsExists ? PSTR("true") : PSTR("false"));
     if (!settingsExists) {
-        SaveSettings();
+        saveSettings();
         return;
     }
 
@@ -222,9 +226,6 @@ void Settings::ReadSettings()
 
     if (root.containsKey(F("connection"))) {
        JsonObject connectionObject = root[F("connection")];
-       if (connectionObject.containsKey(F("uniqueId"))) {
-           connectionSettings.uniqueId = connectionObject[F("uniqueId")].as<String>();
-       }
        if (connectionObject.containsKey(F("mdns"))) {
            connectionSettings.mdns = connectionObject[F("mdns")].as<String>();
        }
@@ -236,6 +237,9 @@ void Settings::ReadSettings()
        }
        if (connectionObject.containsKey(F("ntpOffset"))) {
            connectionSettings.ntpOffset = connectionObject[F("ntpOffset")];
+       }
+       if (connectionObject.containsKey(F("hostname"))) {
+           connectionSettings.hostname = connectionObject[F("hostname")].as<String>();
        }
     }
 
@@ -252,6 +256,15 @@ void Settings::ReadSettings()
        }
        if (mqttObject.containsKey(F("password"))) {
            mqttSettings.password = mqttObject[F("password")].as<String>();
+       }
+       if (mqttObject.containsKey(F("uniqueId"))) {
+           mqttSettings.uniqueId = mqttObject[F("uniqueId")].as<String>();
+       }
+       if (mqttObject.containsKey(F("name"))) {
+           mqttSettings.name = mqttObject[F("name")].as<String>();
+       }
+       if (mqttObject.containsKey(F("model"))) {
+           mqttSettings.model = mqttObject[F("model")].as<String>();
        }
     }
 
@@ -287,7 +300,7 @@ void Settings::ReadSettings()
     }
 }
 
-void Settings::ReadEffects()
+void Settings::readEffects()
 {
     bool effectsExists = SPIFFS.exists(effectsFileName);
     Serial.printf_P(PSTR("SPIFFS Effects file exists: %s\n"), effectsExists ? PSTR("true") : PSTR("false"));
@@ -303,7 +316,7 @@ void Settings::ReadEffects()
         return;
     }
 
-    DynamicJsonDocument json(jsonSerializeSize);
+    DynamicJsonDocument json(serializeSize);
     DeserializationError err = deserializeJson(json, effects);
     effects.close();
     if (err) {
@@ -314,13 +327,13 @@ void Settings::ReadEffects()
 
     JsonArray root = json.as<JsonArray>();
     for (JsonObject effect : root) {
-        effectsManager->ProcessEffectSettings(effect);
+        effectsManager->processEffectSettings(effect);
     }
 }
 
-void Settings::BuildSettingsJson(JsonObject &root)
+void Settings::buildSettingsJson(JsonObject &root)
 {
-    root[F("activeEffect")] = effectsManager->ActiveEffectIndex();
+    root[F("activeEffect")] = effectsManager->activeEffectIndex();
     root[F("logInterval")] = generalSettings.logInterval;
     root[F("working")] = generalSettings.working;
 
@@ -334,23 +347,31 @@ void Settings::BuildSettingsJson(JsonObject &root)
     matrixObject[F("rotation")] = matrixSettings.rotation;
 
     JsonObject connectionObject = root.createNestedObject(F("connection"));
-    connectionObject[F("uniqueId")] = connectionSettings.uniqueId;
     connectionObject[F("mdns")] = connectionSettings.mdns;
     connectionObject[F("apName")] = connectionSettings.apName;
     connectionObject[F("ntpServer")] = connectionSettings.ntpServer;
     connectionObject[F("ntpOffset")] = connectionSettings.ntpOffset;
+    connectionObject[F("hostname")] = connectionSettings.hostname;
 
     JsonObject mqttObject = root.createNestedObject(F("mqtt"));
     mqttObject[F("host")] = mqttSettings.host;
     mqttObject[F("port")] = mqttSettings.port;
     mqttObject[F("username")] = mqttSettings.username;
     mqttObject[F("password")] = mqttSettings.password;
+    mqttObject[F("uniqueId")] = mqttSettings.uniqueId;
+    mqttObject[F("model")] = mqttSettings.model;
+    mqttObject[F("name")] = mqttSettings.name;
+
+    JsonObject buttonObject = root.createNestedObject(F("button"));
+    buttonObject[F("pin")] = buttonSettings.pin;
+    buttonObject[F("type")] = buttonSettings.type;
+    buttonObject[F("state")] = buttonSettings.state;
 
     JsonObject spectrometerObject = root.createNestedObject(F("spectrometer"));
     spectrometerObject[F("active")] = generalSettings.soundControl;
 }
 
-void Settings::BuildEffectsJson(JsonArray &effects)
+void Settings::buildEffectsJson(JsonArray &effects)
 {
     for (Effect *effect : effectsManager->effects) {
         JsonObject effectObject = effects.createNestedObject();
@@ -363,7 +384,7 @@ void Settings::BuildEffectsJson(JsonArray &effects)
     }
 }
 
-void Settings::BuildJsonMqtt(JsonObject &root)
+void Settings::buildJsonMqtt(JsonObject &root)
 {
     root[F("state")] = generalSettings.working ? F("ON") : F("OFF");
     root[F("brightness")] = effectsManager->activeEffect()->settings.brightness;
@@ -380,5 +401,8 @@ Settings::Settings(uint32_t saveInterval)
     connectionSettings.mdns = F("firelamp");
     connectionSettings.apName = F("Fire Lamp");
     connectionSettings.ntpServer = F("europe.pool.ntp.org");
-    connectionSettings.manufacturer = F("coderus");
+    connectionSettings.hostname = F("firelamp");
+
+    mqttSettings.uniqueId = GetUniqueID();
+    mqttSettings.manufacturer = F("coderus");
 }

@@ -29,7 +29,7 @@ namespace  {
 size_t updateSize = 0;
 bool isUpdatingFlag = false;
 
-LampWebServer *instance = nullptr;
+LampWebServer *object = nullptr;
 AsyncWebServer *webServer = nullptr;
 AsyncWebSocket *socket = nullptr;
 ESPReactWifiManager *wifiManager = nullptr;
@@ -46,40 +46,51 @@ void parseTextMessage(const String &message)
     Serial.print(F("<< "));
     Serial.println(message);
 
-    mySettings->ProcessConfig(message);
+    mySettings->processConfig(message);
 }
 
-void onWsEvent(AsyncWebSocket * server, AsyncWebSocketClient * client, AwsEventType type, void * arg, uint8_t *data, size_t len) {
+void onWsEvent(AsyncWebSocket *server, AsyncWebSocketClient *client, AwsEventType type, void *arg, uint8_t *data, size_t len) {
     if (type == WS_EVT_CONNECT) {
         Serial.printf_P(PSTR("ws[%s][%u] connect\n"), server->url(), client->id());
         //        client->printf("Hello Client %u :)", client->id());
         client->ping();
-        lampWebServer->SendConfig();
+        lampWebServer->sendConfig();
     } else if (type == WS_EVT_DISCONNECT) {
         Serial.printf_P(PSTR("ws[%s][%u] disconnect\n"), server->url(), client->id());
     } else if (type == WS_EVT_ERROR) {
-        Serial.printf_P(PSTR("ws[%s][%u] error(%u): %s\n"), server->url(), client->id(), *((uint16_t*)arg), (char*)data);
+        Serial.printf_P(
+            PSTR("ws[%s][%u] error(%u): %s\n"),
+            server->url(),
+            client->id(),
+            *(reinterpret_cast<uint16_t*>(arg)),
+            reinterpret_cast<char*>(data));
     } else if (type == WS_EVT_PONG) {
-        Serial.printf_P(PSTR("ws[%s][%u] pong[%zu]: %s\n"), server->url(), client->id(), len, (len)?(char*)data:"");
+        Serial.printf_P(
+            PSTR("ws[%s][%u] pong[%zu]: %s\n"),
+            server->url(),
+            client->id(),
+            len,
+            len ? reinterpret_cast<char*>(data) : "");
     } else if (type == WS_EVT_DATA) {
-        AwsFrameInfo * info = (AwsFrameInfo*)arg;
+        AwsFrameInfo * info = reinterpret_cast<AwsFrameInfo*>(arg);
         String msg = "";
         if (info->final && info->index == 0 && info->len == len) {
             //the whole message is in a single frame and we got all of it's data
-            Serial.printf_P(PSTR("ws[%s][%u] %s-message[%zu]: "),
-                            server->url(),
-                            client->id(),
-                            info->opcode == WS_TEXT ? PSTR("text") : PSTR("binary"),
-                            info->len);
+            Serial.printf_P(
+                PSTR("ws[%s][%u] %s-message[%llu]: "),
+                server->url(),
+                client->id(),
+                info->opcode == WS_TEXT ? PSTR("text") : PSTR("binary"),
+                info->len);
 
             if (info->opcode == WS_TEXT) {
                 for(size_t i=0; i < info->len; i++) {
-                    msg += (char) data[i];
+                    msg += static_cast<char>(data[i]);
                 }
             } else {
                 char buff[3];
                 for(size_t i=0; i < info->len; i++) {
-                    sprintf(buff, "%02x ", (uint8_t) data[i]);
+                    sprintf(buff, "%02x ", data[i]);
                     msg += buff ;
                 }
             }
@@ -88,7 +99,7 @@ void onWsEvent(AsyncWebSocket * server, AsyncWebSocketClient * client, AwsEventT
             if (info->opcode == WS_TEXT) {
                 //                client->text("I got your text message");
                 parseTextMessage(msg);
-                lampWebServer->SendConfig();
+                lampWebServer->sendConfig();
             } else {
                 //                client->binary("I got your binary message");
                 Serial.println(F("Received binary message"));
@@ -97,28 +108,31 @@ void onWsEvent(AsyncWebSocket * server, AsyncWebSocketClient * client, AwsEventT
             //message is comprised of multiple frames or the frame is split into multiple packets
             if (info->index == 0) {
                 if (info->num == 0)
-                    Serial.printf_P(PSTR("ws[%s][%u] %s-message start\n"),
-                                    server->url(),
-                                    client->id(),
-                                    info->message_opcode == WS_TEXT ? PSTR("text") : PSTR("binary"));
-                Serial.printf_P(PSTR("ws[%s][%u] frame[%u] start[%zu]\n"),
-                                server->url(),
-                                client->id(),
-                                info->num,
-                                info->len);
+                    Serial.printf_P(
+                        PSTR("ws[%s][%u] %s-message start\n"),
+                        server->url(),
+                        client->id(),
+                        info->message_opcode == WS_TEXT ? PSTR("text") : PSTR("binary"));
+                Serial.printf_P(
+                    PSTR("ws[%s][%u] frame[%u] start[%llu]\n"),
+                    server->url(),
+                    client->id(),
+                    info->num,
+                    info->len);
             }
 
-            Serial.printf_P(PSTR("ws[%s][%u] frame[%u] %s[%zu - %zu]: "),
-                            server->url(),
-                            client->id(),
-                            info->num,
-                            info->message_opcode == WS_TEXT ? PSTR("text") : PSTR("binary"),
-                            info->index,
-                            info->index + len);
+            Serial.printf_P(
+                PSTR("ws[%s][%u] frame[%u] %s[%llu - %llu]: "),
+                server->url(),
+                client->id(),
+                info->num,
+                info->message_opcode == WS_TEXT ? PSTR("text") : PSTR("binary"),
+                info->index,
+                info->index + len);
 
             if (info->opcode == WS_TEXT) {
                 for(size_t i=0; i < len; i++) {
-                    msg += (char) data[i];
+                    msg += static_cast<char>(data[i]);
                 }
             } else {
                 char buff[3];
@@ -130,20 +144,22 @@ void onWsEvent(AsyncWebSocket * server, AsyncWebSocketClient * client, AwsEventT
             Serial.println(msg);
 
             if ((info->index + len) == info->len) {
-                Serial.printf_P(PSTR("ws[%s][%u] frame[%u] end[%zu]\n"),
-                                server->url(),
-                                client->id(),
-                                info->num,
-                                info->len);
+                Serial.printf_P(
+                    PSTR("ws[%s][%u] frame[%u] end[%llu]\n"),
+                    server->url(),
+                    client->id(),
+                    info->num,
+                    info->len);
                 if (info->final) {
-                    Serial.printf(PSTR("ws[%s][%u] %s-message end\n"),
-                                  server->url(),
-                                  client->id(),
-                                  info->message_opcode == WS_TEXT ? PSTR("text") : PSTR("binary"));
+                    Serial.printf(
+                        PSTR("ws[%s][%u] %s-message end\n"),
+                        server->url(),
+                        client->id(),
+                        info->message_opcode == WS_TEXT ? PSTR("text") : PSTR("binary"));
                     if (info->message_opcode == WS_TEXT) {
                         //                        client->text("I got your text message");
                         parseTextMessage(msg);
-                        lampWebServer->SendConfig();
+                        lampWebServer->sendConfig();
                     } else {
                         //                        client->binary("I got your binary message");
                         Serial.println(F("Received binary message"));
@@ -189,7 +205,7 @@ void updateHandler(uint8_t *data, size_t len, size_t index, size_t total, bool f
     if (index == 0) {
         isUpdatingFlag = true;
         Serial.println(F("Update started!"));
-        FastLED.clear();
+        myMatrix->clear();
         if (data[0] == '{') {
             if (json) {
                 json.close();
@@ -232,7 +248,7 @@ void updateHandler(uint8_t *data, size_t len, size_t index, size_t total, bool f
             }
         }
         myMatrix->setBrightness(80);
-        myMatrix->setRotation(myMatrix->GetRotation());
+        myMatrix->setRotation(myMatrix->getRotation());
         myMatrix->setTextWrap(false);
     }
     drawProgress(index + len);
@@ -277,14 +293,14 @@ void updateFileHandler(AsyncWebServerRequest *request, const String& filename, s
 
 } // namespace
 
-LampWebServer *LampWebServer::Instance()
+LampWebServer *LampWebServer::instance()
 {
-    return instance;
+    return object;
 }
 
 void LampWebServer::Initialize(uint16_t webPort)
 {
-    if (instance) {
+    if (object) {
         return;
     }
 #if defined(ESP8266)
@@ -292,21 +308,25 @@ void LampWebServer::Initialize(uint16_t webPort)
 #endif
     httpPort = webPort;
     Serial.printf_P(PSTR("Initializing web server at: %u\n"), webPort);
-    instance = new LampWebServer(webPort);
+    object = new LampWebServer(webPort);
 }
 
-bool LampWebServer::IsConnected()
+bool LampWebServer::isConnected()
 {
     return wifiConnected;
 }
 
-void LampWebServer::AutoConnect()
+void LampWebServer::autoConnect()
 {
     if (!webServer) {
         return;
     }
 
-    wifiManager = new ESPReactWifiManager();
+    if (wifiManager) {
+        return;
+    }
+
+    wifiManager = new ESPReactWifiManager(mySettings->connectionSettings.hostname);
     wifiManager->setFallbackToAp(true);
     wifiManager->onFinished([](bool isAPMode) {
         webServer->begin();
@@ -331,10 +351,25 @@ LampWebServer::LampWebServer(uint16_t webPort)
 
     webServer->addHandler(socket);
 
-    configureHandlers();
+    webServer->serveStatic(PSTR("/static/js/"), SPIFFS, PSTR("/"), PSTR("max-age=86400"));
+    webServer->serveStatic(PSTR("/static/css/"), SPIFFS, PSTR("/"), PSTR("max-age=86400"));
+    webServer->serveStatic(PSTR("/effects.json"), SPIFFS, PSTR("/effects.json"), PSTR("no-cache"));
+    webServer->serveStatic(PSTR("/settings.json"), SPIFFS, PSTR("/settings.json"), PSTR("no-cache"));
+    webServer->serveStatic(PSTR("/"), SPIFFS, PSTR("/"), PSTR("max-age=86400")).setDefaultFile(PSTR("index.html"));
+
+    webServer->on(PSTR("/effectJson"), HTTP_GET, [](AsyncWebServerRequest *request) {
+        PrettyAsyncJsonResponse *response = new PrettyAsyncJsonResponse(false, 1024);
+        JsonObject root = response->getRoot();
+        mySettings->buildJsonMqtt(root);
+        response->setLength();
+        request->send(response);
+    });
+
+    webServer->on(PSTR("/update"), HTTP_POST, updateRequestHandler, updateFileHandler, updateBodyHandler);
+    webServer->on(PSTR("/updateSize"), HTTP_POST, updateSizeHandler);
 }
 
-void LampWebServer::Process()
+void LampWebServer::loop()
 {
     if (wifiManager) {
         wifiManager->loop();
@@ -352,7 +387,7 @@ void SendJsonToWs(const DynamicJsonDocument &json)
     socket->textAll(buffer);
 }
 
-void LampWebServer::SendConfig()
+void LampWebServer::sendConfig()
 {
     if (!socket) {
         return;
@@ -364,10 +399,11 @@ void LampWebServer::SendConfig()
 
     DynamicJsonDocument json(512);
     JsonObject root = json.to<JsonObject>();
-    root[F("activeEffect")] = effectsManager->ActiveEffectIndex();
+    root[F("activeEffect")] = effectsManager->activeEffectIndex();
     root[F("working")] = mySettings->generalSettings.working;
     SendJsonToWs(json);
 
+    Serial.println(F("Sending state to ws clients"));
     serializeJsonPretty(json, Serial);
     Serial.println();
 }
@@ -382,29 +418,7 @@ void LampWebServer::onConnected(void (*func)(bool))
     onConnectedCallback = func;
 }
 
-void LampWebServer::Update()
+void LampWebServer::update()
 {
-    SendConfig();
-}
-
-void LampWebServer::configureHandlers()
-{
-    webServer->serveStatic(PSTR("/static/js/"), SPIFFS, PSTR("/"))
-        .setCacheControl(PSTR("max-age=86400"));
-    webServer->serveStatic(PSTR("/static/css/"), SPIFFS, PSTR("/"))
-        .setCacheControl(PSTR("max-age=86400"));
-    webServer->serveStatic(PSTR("/"), SPIFFS, PSTR("/"))
-        .setCacheControl(PSTR("max-age=86400"))
-        .setDefaultFile(PSTR("index.html"));
-
-    webServer->on(PSTR("/effectJson"), HTTP_GET, [](AsyncWebServerRequest *request) {
-        PrettyAsyncJsonResponse *response = new PrettyAsyncJsonResponse(false, 1024);
-        JsonObject root = response->getRoot();
-        mySettings->BuildJsonMqtt(root);
-        response->setLength();
-        request->send(response);
-    });
-
-    webServer->on(PSTR("/update"), HTTP_POST, updateRequestHandler, updateFileHandler, updateBodyHandler);
-    webServer->on(PSTR("/updateSize"), HTTP_POST, updateSizeHandler);
+    sendConfig();
 }

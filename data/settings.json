@@ -14,13 +14,17 @@
     "mdns": "firelamp",
     "apName": "Fire Lamp",
     "ntpServer": "europe.pool.ntp.org",
-    "ntpOffset": 10800
+    "ntpOffset": 10800,
+    "hostname": "firelamp"
   },
   "mqtt": {
     "host": "",
     "port": 1883,
     "username": "",
-    "password": ""
+    "password": "",
+    "uniqueId": "devlamp8266",
+    "name": "devlamp8266",
+    "model": "devlamp8266"
   },
   "button": {
     "pin": 0,
