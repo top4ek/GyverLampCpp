@@ -16,7 +16,8 @@ String getClockTime()
 
 } // namespace
 
-ClockHorizontal1Effect::ClockHorizontal1Effect()
+ClockHorizontal1Effect::ClockHorizontal1Effect(const String &id)
+    : Effect(id)
 {
 }
 
@@ -94,7 +95,7 @@ void ClockHorizontal1Effect::activate()
     myMatrix->setTextWrap(false);
     myMatrix->setTextColor(hoursColor);
 
-    uint8_t matrixRotation = myMatrix->getRotation();
+    uint8_t matrixRotation = mySettings->matrixSettings.rotation;
     int horizontalRotation = matrixRotation - 3;
     if (horizontalRotation < 0) {
         horizontalRotation = horizontalRotation + 4;
@@ -109,8 +110,9 @@ void ClockHorizontal1Effect::deactivate()
 {
     timeClient->setInterval(0);
     uint8_t matrixRotation = myMatrix->getRotation();
-    if (myMatrix->getRotation() != matrixRotation) {
-        myMatrix->setRotation(matrixRotation);
+    uint8_t settingsRotation = mySettings->matrixSettings.rotation;
+    if (matrixRotation != settingsRotation) {
+        myMatrix->setRotation(settingsRotation);
     }
 }
 

@@ -7,9 +7,15 @@
 #if defined(ESP32)
 #include <Update.h>
 #include <SPIFFS.h>
+#define FLASHFS SPIFFS
 #else
 #include <Updater.h>
-#include <FS.h>
+#include <LittleFS.h>
+#define FLASHFS LittleFS
+
+extern "C" uint32_t _FS_start;
+extern "C" uint32_t _FS_end;
+
 #endif
 
 #ifndef U_FS
@@ -40,6 +46,30 @@ void (*onConnectedCallback)(bool) = nullptr;
 uint16_t httpPort = 80;
 
 uint32_t restartTimer = 0;
+
+const char upload_html[] PROGMEM = \
+"<form method='POST' enctype='multipart/form-data'>\n"\
+"<h1>Upload file</h1>\n"\
+"<input id='file' type='file' name='update' onchange='sub(this)' style=display:none>\n"\
+"<label id='file-input' for='file'>Click to choose file</label>\n"\
+"<input id='btn' type='submit' class=btn value='Upload' disabled>\n"\
+"</form>\n"\
+"<script>\n"\
+"function sub(obj) {\n"\
+"    var fileName = obj.value.split('\\\\');\n"\
+"    console.log(fileName);\n"\
+"    document.getElementById('file-input').innerHTML = '   '+ fileName[fileName.length-1];\n"\
+"    document.getElementById('btn').disabled = false;\n"\
+"};\n"\
+"</script>\n"\
+"<style>\n"\
+"#file-input,input{width:100%;height:44px;border-radius:4px;margin:10px auto;font-size:15px}\n"\
+"input{background:#f1f1f1;border:0;padding:0 15px}body{background:#3498db;font-family:sans-serif;font-size:14px;color:#777}\n"\
+"#file-input{padding:0;border:1px solid #ddd;line-height:44px;text-align:center;display:block;cursor:pointer}\n"\
+"form{background:#fff;max-width:258px;margin:75px auto;padding:10px;border-radius:5px;text-align:center}\n"\
+".btn{background:#3498db;color:#fff;cursor:pointer}\n"\
+".btn:disabled{background:#98342b;color:#fff;cursor:pointer}\n"\
+"</style>\n";
 
 void parseTextMessage(const String &message)
 {
@@ -205,14 +235,15 @@ void updateHandler(uint8_t *data, size_t len, size_t index, size_t total, bool f
     if (index == 0) {
         isUpdatingFlag = true;
         Serial.println(F("Update started!"));
+        Serial.printf_P(PSTR("Total size: %zu\n"), total);
         myMatrix->clear();
         if (data[0] == '{') {
             if (json) {
                 json.close();
             }
-            json = SPIFFS.open("/settings.json", "w");
+            json = FLASHFS.open("/settings.json", "w");
             if (!json) {
-                Serial.println(F("SPIFFS Error opening settings file for write"));
+                Serial.println(F("FLASHFS Error opening settings file for write"));
                 return;
             }
             Serial.println(F("Uploading settings started!"));
@@ -220,27 +251,40 @@ void updateHandler(uint8_t *data, size_t len, size_t index, size_t total, bool f
             if (json) {
                 json.close();
             }
-            json = SPIFFS.open("/effects.json", "w");
+            json = FLASHFS.open("/effects.json", "w");
             if (!json) {
-                Serial.println(F("SPIFFS Error opening effects file for write"));
+                Serial.println(F("FLASHFS Error opening effects file for write"));
                 return;
             }
             Serial.println(F("Uploading effects started!"));
         } else {
-            int command = U_FLASH;
-            if (data[0] == 0) {
-                command = U_FS;
-                Serial.println(F("Uploading SPIFFS started!"));
-            } else {
+            int command = U_FS;
+            if (data[0] == 0xe9 || data[0] == 0x1f) {
+                command = U_FLASH;
                 Serial.println(F("Uploading FLASH started!"));
+            } else {
+                Serial.println(F("Uploading FS started!"));
             }
             if (updateSize == 0) {
-                updateSize = total;
+                if (command == U_FS) {
+#if defined(ESP32)
+                    updateSize = UPDATE_SIZE_UNKNOWN;
+#else
+                    updateSize = (uintptr_t)&_FS_end - (uintptr_t)&_FS_start;
+#endif
+                } else {
+#if defined(ESP32)
+                    updateSize = UPDATE_SIZE_UNKNOWN;
+#else
+                    updateSize = total;
+#endif
+                }
             }
 #if defined(ESP8266)
             Update.runAsync(true);
 #endif
             if (!Update.begin(updateSize, command)) {
+                Serial.print(F("Upload begin error: "));
                 Update.printError(Serial);
                 myMatrix->fill(CRGB::Red, true);
                 isUpdatingFlag = false;
@@ -255,6 +299,7 @@ void updateHandler(uint8_t *data, size_t len, size_t index, size_t total, bool f
     if (json) {
         json.write(data, len);
     } else if (Update.write(data, len) != len) {
+        Serial.print(F("Upload write error: "));
         Update.printError(Serial);
         myMatrix->fill(CRGB::Red, true);
         isUpdatingFlag = false;
@@ -264,6 +309,7 @@ void updateHandler(uint8_t *data, size_t len, size_t index, size_t total, bool f
         if (json) {
             json.close();
         } else if (!Update.end(true)) {
+            Serial.print(F("Upload end error: "));
             Update.printError(Serial);
             myMatrix->fill(CRGB::Red, true);
             isUpdatingFlag = false;
@@ -336,7 +382,15 @@ void LampWebServer::autoConnect()
         }
     });
     wifiManager->onNotFound([](AsyncWebServerRequest* request) {
-        request->send(SPIFFS, F("index.html"));
+        if (request->url() == String(F("/"))
+                || request->url() == String(F("/wifi.html"))
+                || request->url() == String(F("/index.html"))) {
+            request->redirect(String(F("http://"))
+                + request->client()->localIP().toString()
+                + String(F("/update")));
+        } else {
+            request->send(FLASHFS, F("index.html"));
+        }
     });
     wifiManager->setupHandlers(webServer);
     wifiManager->autoConnect(mySettings->connectionSettings.apName);
@@ -351,11 +405,11 @@ LampWebServer::LampWebServer(uint16_t webPort)
 
     webServer->addHandler(socket);
 
-    webServer->serveStatic(PSTR("/static/js/"), SPIFFS, PSTR("/"), PSTR("max-age=86400"));
-    webServer->serveStatic(PSTR("/static/css/"), SPIFFS, PSTR("/"), PSTR("max-age=86400"));
-    webServer->serveStatic(PSTR("/effects.json"), SPIFFS, PSTR("/effects.json"), PSTR("no-cache"));
-    webServer->serveStatic(PSTR("/settings.json"), SPIFFS, PSTR("/settings.json"), PSTR("no-cache"));
-    webServer->serveStatic(PSTR("/"), SPIFFS, PSTR("/"), PSTR("max-age=86400")).setDefaultFile(PSTR("index.html"));
+    webServer->serveStatic(PSTR("/static/js/"), FLASHFS, PSTR("/"), PSTR("max-age=86400"));
+    webServer->serveStatic(PSTR("/static/css/"), FLASHFS, PSTR("/"), PSTR("max-age=86400"));
+    webServer->serveStatic(PSTR("/effects.json"), FLASHFS, PSTR("/effects.json"), PSTR("no-cache"));
+    webServer->serveStatic(PSTR("/settings.json"), FLASHFS, PSTR("/settings.json"), PSTR("no-cache"));
+    webServer->serveStatic(PSTR("/"), FLASHFS, PSTR("/"), PSTR("max-age=86400")).setDefaultFile(PSTR("index.html"));
 
     webServer->on(PSTR("/effectJson"), HTTP_GET, [](AsyncWebServerRequest *request) {
         PrettyAsyncJsonResponse *response = new PrettyAsyncJsonResponse(false, 1024);
@@ -365,6 +419,9 @@ LampWebServer::LampWebServer(uint16_t webPort)
         request->send(response);
     });
 
+    webServer->on(PSTR("/update"), HTTP_GET, [](AsyncWebServerRequest *request) {
+        request->send_P(200, "text/html", upload_html);
+    });
     webServer->on(PSTR("/update"), HTTP_POST, updateRequestHandler, updateFileHandler, updateBodyHandler);
     webServer->on(PSTR("/updateSize"), HTTP_POST, updateSizeHandler);
 }

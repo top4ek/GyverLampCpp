@@ -2,8 +2,10 @@
 
 #if defined(ESP32)
 #include <SPIFFS.h>
+#define FLASHFS SPIFFS
 #else
-#include <FS.h>
+#include <LittleFS.h>
+#define FLASHFS LittleFS
 #endif
 
 #include "LocalDNS.h"
@@ -27,6 +29,8 @@ uint16_t webServerPort = 80;
 #if defined(ESP32)
 const uint8_t btnPin = 15;
 const GButton::PullType btnType = GButton::PullTypeLow;
+TaskHandle_t processMatrixTaskHandle = 0;
+TaskHandle_t userTaskHandle = 0;
 #elif defined(SONOFF)
 const uint8_t btnPin = 0;
 const GButton::PullType btnType = GButton::PullTypeHigh;
@@ -47,6 +51,38 @@ uint32_t logTimer = 0;
 
 bool setupMode = false;
 bool connectFinished = false;
+
+void processMatrix()
+{
+    if (mySettings->generalSettings.working) {
+        effectsManager->loop();
+    } else {
+        myMatrix->clear(true);
+    }
+}
+
+#if defined(ESP32)
+void processMatrix32()
+{
+    if (userTaskHandle == 0) {
+        noInterrupts();
+        userTaskHandle = xTaskGetCurrentTaskHandle();
+        xTaskNotifyGive(processMatrixTaskHandle);
+        ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(200));
+        interrupts();
+        userTaskHandle = 0;
+    }
+}
+
+void processMatrixTask(void *)
+{
+    for (;;) {
+        ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+        processMatrix();
+        xTaskNotifyGive(userTaskHandle);
+    }
+}
+#endif
 
 void printFlashInfo()
 {
@@ -92,6 +128,9 @@ void printFreeHeap()
 
 void processButton()
 {
+    if (mySettings->buttonSettings.pin == 0) {
+        return;
+    }
     button->tick();
     if (button->isSingle()) {
         Serial.println(F("Single button"));
@@ -161,18 +200,23 @@ void setup() {
     printFlashInfo();
     printFreeHeap();
 
-    if(!SPIFFS.begin()) {
-        Serial.println(F("An Error has occurred while mounting SPIFFS"));
+    if(!FLASHFS.begin()) {
+        Serial.println(F("An Error has occurred while mounting FLASHFS"));
         return;
     }
 
-    EffectsManager::Initialize();
     Settings::Initialize();
 // default values for button
     mySettings->buttonSettings.pin = btnPin;
     mySettings->buttonSettings.type = btnType;
     mySettings->buttonSettings.state = btnState;
-    mySettings->readSettings();
+    if (!mySettings->readSettings()) {
+        mySettings->buttonSettings.pin = 0;
+    }
+
+    Serial.printf_P(PSTR("Button pin: %d\n"), mySettings->buttonSettings.pin);
+
+    EffectsManager::Initialize();
     mySettings->readEffects();
     MyMatrix::Initialize();
 
@@ -187,23 +231,33 @@ void setup() {
     button->setTickMode(false);
     button->setStepTimeout(20);
 
+    myMatrix->matrixTest();
+
+    button->tick();
+    if (button->state()) {
+        Serial.println(F("Setup mode entered. No effects!"));
+        myMatrix->setBrightness(80);
+        myMatrix->fill(CRGB(0, 20, 0), true);
+        setupMode = true;
+        myMatrix->clear(true);
+        return;
+    }
+
     LampWebServer::Initialize(webServerPort);
 
     Serial.println(F("AutoConnect started"));
     lampWebServer->onConnected([](bool isConnected) {
-        connectFinished = true;
         Serial.println(F("AutoConnect finished"));
-        LocalDNS::Initialize();
-        if (localDNS->begin()) {
-            localDNS->addService(F("http"), F("tcp"), webServerPort);
-        } else {
-            Serial.println(F("An Error has occurred while initializing mDNS"));
-        }
-        myMatrix->matrixTest();
         if (isConnected) {
+            LocalDNS::Initialize();
+            if (localDNS->begin()) {
+                localDNS->addService(F("http"), F("tcp"), webServerPort);
+            } else {
+                Serial.println(F("An Error has occurred while initializing mDNS"));
+            }
             TimeClient::Initialize();
             MqttClient::Initialize();
-        } else {
+        } else if (mySettings->buttonSettings.pin > 0) {
             button->tick();
             if (button->state()) {
                 Serial.println(F("Setup mode entered. No effects!"));
@@ -218,10 +272,16 @@ void setup() {
 //    if (mySettings->generalSettings.soundControl) {
 //        Spectrometer::Initialize();
 //    }
-
-        effectsManager->activateEffect(mySettings->generalSettings.activeEffect);
+        if (!setupMode) {
+            effectsManager->activateEffect(mySettings->generalSettings.activeEffect);
+        }
+        connectFinished = true;
     });
     lampWebServer->autoConnect();
+
+#if defined(ESP32)
+    xTaskCreatePinnedToCore(processMatrixTask, "FastLEDshowTask", 10000, NULL, 2, &processMatrixTaskHandle, 0);
+#endif
 }
 
 void loop() {
@@ -242,9 +302,6 @@ void loop() {
     localDNS->loop();
     if (lampWebServer->isConnected()) {
         timeClient->loop();
-#if defined(ESP32)
-        mqtt->loop();
-#endif
     } else if (setupMode) {
         return;
     }
@@ -258,11 +315,11 @@ void loop() {
 //        mySpectrometer->loop();
 //    }
 
-    if (mySettings->generalSettings.working) {
-        effectsManager->loop();
-    } else {
-        myMatrix->clear(true);
-    }
+#if defined(ESP32)
+    processMatrix32();
+#else
+    processMatrix();
+#endif
 
     mySettings->loop();
 

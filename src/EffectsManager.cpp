@@ -102,7 +102,7 @@ void EffectsManager::Initialize()
 
 void EffectsManager::processEffectSettings(const JsonObject &json)
 {
-    const char* effectId = json[F("i")];
+    const String effectId = json[F("i")].as<String>();
 
     if (effectsMap.count(effectId) <= 0) {
         Serial.print(F("Missing effect: "));
@@ -113,6 +113,13 @@ void EffectsManager::processEffectSettings(const JsonObject &json)
     Effect *effect = effectsMap[effectId];
     effects.push_back(effect);
     effect->initialize(json);
+}
+
+void EffectsManager::processAllEffects()
+{
+    for (auto effectPair : effectsMap) {
+        effects.push_back(effectPair.second);
+    }
 }
 
 void EffectsManager::loop()
@@ -158,7 +165,18 @@ void EffectsManager::changeEffectByName(const String &name)
     for (size_t index = 0; index < effects.size(); index++) {
         Effect *effect = effects[index];
         if (effect->settings.name == name) {
-            activateEffect(activeIndex);
+            activateEffect(index);
+            break;
+        }
+    }
+}
+
+void EffectsManager::changeEffectById(const String &id)
+{
+    for (size_t index = 0; index < effects.size(); index++) {
+        Effect *effect = effects[index];
+        if (effect->settings.id == id) {
+            activateEffect(index);
             break;
         }
     }
@@ -223,6 +241,12 @@ Effect *EffectsManager::activeEffect()
 uint8_t EffectsManager::activeEffectIndex()
 {
     return activeIndex;
+}
+
+template <typename T>
+void RegisterEffect(const String &id)
+{
+    effectsMap[id] = new T(id);
 }
 
 EffectsManager::EffectsManager()

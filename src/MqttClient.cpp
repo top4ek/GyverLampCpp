@@ -6,24 +6,22 @@
 
 #if defined(ESP8266)
 #include <ESP8266WiFi.h>
-#include <AsyncMqttClient.h>
 #else
 #include <WiFi.h>
-#include <PubSubClient.h>
 #endif
+
+#include <Ticker.h>
+#include <PangolinMQTT.h>
 
 #include "Settings.h"
 
 namespace
 {
 
+Ticker mqttReconnectTimer;
+
 MqttClient *object = nullptr;
-#if defined(ESP8266)
-AsyncMqttClient *client = nullptr;
-#else
-unsigned long lastReconnectAttempt = 0;
-PubSubClient *client = nullptr;
-#endif
+PangolinMQTT *client = nullptr;
 
 String commonTopic;
 
@@ -36,43 +34,45 @@ String clientId;
 
 void subscribe()
 {
+    if (!client->connected()) {
+        return;
+    }
+
     Serial.print(F("Subscribing to topic: "));
     Serial.println(setTopic);
     client->subscribe(setTopic.c_str(), 0);
 }
 
-bool sendJson(const char* topic, const DynamicJsonDocument &doc)
+void sendString(String topic, String message, uint8_t qos = 2, bool retain = false)
 {
-#if defined(ESP8266)
+    if (!client->connected()) {
+        return;
+    }
+
+    client->publish(topic.c_str(), qos, retain, (uint8_t*)message.c_str(), message.length(), false);
+}
+
+bool sendJson(String topic, const DynamicJsonDocument &doc)
+{
+    if (!client->connected()) {
+        return false;
+    }
+
     String buffer;
     if (!serializeJson(doc, buffer)) {
         Serial.println(F("writing payload: wrong size!"));
         return false;
     }
-    client->publish(topic, 2, false, buffer.c_str(), buffer.length());
-#else
-    size_t len = measureJson(doc);
-
-    if (!client->beginPublish(topic, len, true)) {
-        Serial.println(F("beginPublish failed!"));
-        return false;
-    }
-
-    if (serializeJson(doc, *client) != len) {
-        Serial.println(F("writing payload: wrong size!"));
-        return false;
-    }
-
-    if (!client->endPublish()) {
-        Serial.println(F("endPublish failed!"));
-        return false;
-    }
-#endif
+    sendString(topic, buffer);
     return true;
 }
 
 void sendState()
 {
+    if (!client->connected()) {
+        return;
+    }
+
     DynamicJsonDocument doc(1024);
     JsonObject json = doc.to<JsonObject>();
 
@@ -83,24 +83,27 @@ void sendState()
     serializeJsonPretty(doc, Serial);
     Serial.println();
 
-    boolean success = sendJson(stateTopic.c_str(), doc);
+    boolean success = sendJson(stateTopic, doc);
     Serial.printf_P(PSTR("State sent: %s\n"), success ? PSTR("success") : PSTR("fail"));
 }
 
 void sendAvailability()
 {
+    if (!client->connected()) {
+        return;
+    }
+
     Serial.println(F("Sending availability"));
     Serial.println(availabilityTopic);
-#if defined(ESP8266)
-    boolean success = client->publish(availabilityTopic.c_str(), 2, true, "true", 4);
-#else
-    boolean success = client->publish_P(availabilityTopic.c_str(), PSTR("true"), true);
-#endif
-    Serial.printf_P(PSTR("Availability sent: %s\n"), success ? PSTR("success") : PSTR("fail"));
+    sendString(availabilityTopic, F("true"), 2, true);
 }
 
 void sendDiscovery()
 {
+    if (!client->connected()) {
+        return;
+    }
+
     DynamicJsonDocument doc(1024*5);
     doc[F("~")] = commonTopic;
     doc[F("name")] = mySettings->mqttSettings.name;
@@ -113,6 +116,8 @@ void sendDiscovery()
     doc[F("schema")] = F("json");
     doc[F("brightness")] = true;
     doc[F("effect")] = true;
+    doc[F("rgb")] = true;
+    doc[F("json_attr_t")] =F("~/state");
 
     JsonObject dev = doc.createNestedObject(F("dev"));
     dev[F("mf")] = mySettings->mqttSettings.manufacturer;
@@ -129,20 +134,16 @@ void sendDiscovery()
     serializeJsonPretty(doc, Serial);
     Serial.println();
 
-    boolean success = sendJson(configTopic.c_str(), doc);
+    boolean success = sendJson(configTopic, doc);
     Serial.printf_P(PSTR("Discovery sent: %s\n"), success ? PSTR("success") : PSTR("fail"));
 }
 
-#if defined(ESP8266)
-void callback(char* topic, char* payload, AsyncMqttClientMessageProperties properties, size_t length, size_t index, size_t total)
-#else
-void callback(char* topic, byte* payload, unsigned int length)
-#endif
+void callback(const char* topic, uint8_t* payload, struct PANGO_PROPS props, size_t len, size_t index, size_t total)
 {
     Serial.println(topic);
 
     DynamicJsonDocument doc(1024);
-    if (deserializeJson(doc, payload, length) != DeserializationError::Ok) {
+    if (deserializeJson(doc, payload, len) != DeserializationError::Ok) {
         Serial.println(F("Error parsing json data"));
         return;
     }
@@ -168,62 +169,97 @@ void onMqttConnect(bool sessionPresent)
     subscribe();
 }
 
-bool connectToMqtt() {
-    Serial.println(F("Connecting to MQTT..."));
-#if defined(ESP8266)
-    client->connect();
-    return true;
-#else
-    client->connect(
-        clientId.c_str(),
-        mySettings->mqttSettings.username.c_str(),
-        mySettings->mqttSettings.password.c_str(),
-        availabilityTopic.c_str(),
-        1,
-        true,
-        PSTR("false"));
-    if (client->connected()) {
-        onMqttConnect(true);
+void connectToMqtt() {
+    if (!WiFi.isConnected()) {
+        return;
     }
-    return client->connected();
-#endif
+
+    if (!client) {
+        return;
+    }
+
+    Serial.println(F("Connecting to MQTT..."));
+    client->connect();
 }
 
-#if defined(ESP8266)
-void onMqttDisconnect(AsyncMqttClientDisconnectReason reason)
+void onMqttDisconnect(int8_t reason)
 {
     Serial.print(F("MQTT disconnect reason: "));
     switch (reason) {
-    case AsyncMqttClientDisconnectReason::TCP_DISCONNECTED:
+    case TCP_DISCONNECTED:
         Serial.println(F("TCP_DISCONNECTED"));
         break;
-    case AsyncMqttClientDisconnectReason::MQTT_UNACCEPTABLE_PROTOCOL_VERSION:
-        Serial.println(F("MQTT_UNACCEPTABLE_PROTOCOL_VERSION"));
-        break;
-    case AsyncMqttClientDisconnectReason::MQTT_IDENTIFIER_REJECTED:
-        Serial.println(F("MQTT_IDENTIFIER_REJECTED"));
-        break;
-    case AsyncMqttClientDisconnectReason::MQTT_SERVER_UNAVAILABLE:
+    case MQTT_SERVER_UNAVAILABLE:
         Serial.println(F("MQTT_SERVER_UNAVAILABLE"));
         break;
-    case AsyncMqttClientDisconnectReason::MQTT_MALFORMED_CREDENTIALS:
-        Serial.println(F("MQTT_MALFORMED_CREDENTIALS"));
+    case UNRECOVERABLE_CONNECT_FAIL:
+        Serial.println(F("UNRECOVERABLE_CONNECT_FAIL"));
         break;
-    case AsyncMqttClientDisconnectReason::MQTT_NOT_AUTHORIZED:
-        Serial.println(F("MQTT_NOT_AUTHORIZED"));
-        break;
-    case AsyncMqttClientDisconnectReason::ESP8266_NOT_ENOUGH_SPACE:
-        Serial.println(F("ESP8266_NOT_ENOUGH_SPACE"));
-        break;
-    case AsyncMqttClientDisconnectReason::TLS_BAD_FINGERPRINT:
+    case TLS_BAD_FINGERPRINT:
         Serial.println(F("TLS_BAD_FINGERPRINT"));
+        break;
+    case TCP_TIMEOUT:
+        Serial.println(F("TCP_TIMEOUT"));
+        break;
+    case SUBSCRIBE_FAIL:
+        Serial.println(F("SUBSCRIBE_FAIL"));
+        break;
+    case INBOUND_QOS_FAIL:
+        Serial.println(F("INBOUND_QOS_FAIL"));
+        break;
+    case OUTBOUND_QOS_FAIL:
+        Serial.println(F("OUTBOUND_QOS_FAIL"));
+        break;
+    case INBOUND_QOS_ACK_FAIL:
+        Serial.println(F("INBOUND_QOS_ACK_FAIL"));
+        break;
+    case OUTBOUND_QOS_ACK_FAIL:
+        Serial.println(F("OUTBOUND_QOS_ACK_FAIL"));
+        break;
+    case INBOUND_PUB_TOO_BIG:
+        Serial.println(F("INBOUND_PUB_TOO_BIG"));
+        break;
+    case OUTBOUND_PUB_TOO_BIG:
+        Serial.println(F("OUTBOUND_PUB_TOO_BIG"));
+        break;
+    case BOGUS_PACKET:
+        Serial.println(F("BOGUS_PACKET"));
+        break;
+    case BOGUS_ACK:
+        Serial.println(F("BOGUS_ACK"));
         break;
     default:
         Serial.printf_P(PSTR("unknown %d\n"), reason);
     }
+}
 
-    if (WiFi.isConnected()) {
-         connectToMqtt();
+#if defined(ESP8266)
+WiFiEventHandler wifiConnectHandler;
+WiFiEventHandler wifiDisconnectHandler;
+
+void onWifiConnect(const WiFiEventStationModeGotIP& event) {
+    Serial.println("Connected to Wi-Fi.");
+    mqttReconnectTimer.once(2, connectToMqtt);
+}
+
+void onWifiDisconnect(const WiFiEventStationModeDisconnected& event) {
+    Serial.println("Disconnected from Wi-Fi.");
+    mqttReconnectTimer.detach(); // ensure we don't reconnect to MQTT while reconnecting to Wi-Fi
+}
+
+#else
+void WiFiEvent(WiFiEvent_t event) {
+    switch(event) {
+    case SYSTEM_EVENT_STA_GOT_IP:
+        Serial.println("Connected to Wi-Fi.");
+        mqttReconnectTimer.once(2, connectToMqtt);
+        break;
+    case SYSTEM_EVENT_STA_DISCONNECTED:
+        Serial.println("Disconnected from Wi-Fi.");
+        mqttReconnectTimer.detach(); // ensure we don't reconnect to MQTT while reconnecting to Wi-Fi
+        break;
+    default:
+        break;
     }
 }
 #endif
@@ -245,30 +281,6 @@ void MqttClient::Initialize()
     object = new MqttClient();
 }
 
-void MqttClient::loop()
-{
-#if defined(ESP8266)
-    return;
-#else
-    if (!client) {
-        return;
-    }
-
-    if (client->connected()) {
-        client->loop();
-    } else {
-        unsigned long now = millis();
-        if (now - lastReconnectAttempt > 5000) {
-            lastReconnectAttempt = now;
-            // Attempt to reconnect
-            if (connectToMqtt()) {
-                lastReconnectAttempt = 0;
-            }
-        }
-    }
-#endif
-}
-
 void MqttClient::update()
 {
     if (!client) {
@@ -285,6 +297,13 @@ MqttClient::MqttClient()
         return;
     }
 
+#ifdef ARDUINO_ARCH_ESP8266
+    wifiConnectHandler = WiFi.onStationModeGotIP(onWifiConnect);
+    wifiDisconnectHandler = WiFi.onStationModeDisconnected(onWifiDisconnect);
+#else
+    WiFi.onEvent(WiFiEvent);
+#endif
+
     commonTopic = String(F("homeassistant/light/")) + mySettings->connectionSettings.mdns;
     setTopic = commonTopic + String(F("/set"));
     stateTopic = commonTopic + String(F("/state"));
@@ -292,8 +311,7 @@ MqttClient::MqttClient()
     availabilityTopic = commonTopic + String(F("/available"));
     clientId = String(F("FireLampClient-")) + mySettings->connectionSettings.mdns;
 
-#if defined(ESP8266)
-    client = new AsyncMqttClient;
+    client = new PangolinMQTT;
     client->onConnect(onMqttConnect);
     client->onDisconnect(onMqttDisconnect);
     client->onMessage(callback);
@@ -301,16 +319,11 @@ MqttClient::MqttClient()
     client->setWill(availabilityTopic.c_str(),
                     1,
                     true,
-                    "false",
-                    5);
+                    "false");
     client->setCredentials(mySettings->mqttSettings.username.c_str(),
                            mySettings->mqttSettings.password.c_str());
-#else
-    static WiFiClient wifi;
-    client = new PubSubClient(wifi);
-    client->setCallback(callback);
-#endif
     client->setServer(mySettings->mqttSettings.host.c_str(),
                       mySettings->mqttSettings.port);
-    connectToMqtt();
+
+    mqttReconnectTimer.once(2, connectToMqtt);
 }

@@ -9,8 +9,10 @@
 
 #if defined(ESP32)
 #include <SPIFFS.h>
+#define FLASHFS SPIFFS
 #else
-#include <FS.h>
+#include <LittleFS.h>
+#define FLASHFS LittleFS
 #endif
 #include "effects/Effect.h"
 
@@ -78,9 +80,9 @@ void Settings::saveLater()
 void Settings::saveSettings()
 {
     Serial.print(F("Saving settings... "));
-    File file = SPIFFS.open(settingsFileName, "w");
+    File file = FLASHFS.open(settingsFileName, "w");
     if (!file) {
-        Serial.println(F("Error opening settings file from SPIFFS!"));
+        Serial.println(F("Error opening settings file from FLASHFS!"));
         return;
     }
 
@@ -101,9 +103,9 @@ void Settings::saveSettings()
 void Settings::saveEffects()
 {
     Serial.print(F("Saving effects... "));
-    File file = SPIFFS.open(effectsFileName, "w");
+    File file = FLASHFS.open(effectsFileName, "w");
     if (!file) {
-        Serial.println(F("Error opening effects file from SPIFFS!"));
+        Serial.println(F("Error opening effects file from FLASHFS!"));
         return;
     }
 
@@ -162,10 +164,14 @@ void Settings::processCommandMqtt(const JsonObject &json)
     if (json.containsKey(F("state"))) {
         const String state = json[F("state")];
         mySettings->generalSettings.working = state == F("ON");
-    }
-    if (json.containsKey(F("effect"))) {
-        const String effect = json[F("effect")];
-        effectsManager->changeEffectByName(effect);
+
+        if (json.containsKey(F("effect"))) {
+            const String effect = json[F("effect")];
+            effectsManager->changeEffectByName(effect);
+        }
+        if (json.containsKey(F("color"))) {
+            effectsManager->changeEffectById(F("Color"));
+        }
     }
     effectsManager->updateCurrentSettings(json);
     saveLater();
@@ -173,29 +179,29 @@ void Settings::processCommandMqtt(const JsonObject &json)
     lampWebServer->update();
 }
 
-void Settings::readSettings()
+bool Settings::readSettings()
 {
-    bool settingsExists = SPIFFS.exists(settingsFileName);
-    Serial.printf_P(PSTR("SPIFFS Settings file exists: %s\n"), settingsExists ? PSTR("true") : PSTR("false"));
+    bool settingsExists = FLASHFS.exists(settingsFileName);
+    Serial.printf_P(PSTR("FLASHFS Settings file exists: %s\n"), settingsExists ? PSTR("true") : PSTR("false"));
     if (!settingsExists) {
         saveSettings();
-        return;
+        return false;
     }
 
-    File settings = SPIFFS.open(settingsFileName, "r");
-    Serial.printf_P(PSTR("SPIFFS Settings file size: %zu\n"), settings.size());
+    File settings = FLASHFS.open(settingsFileName, "r");
+    Serial.printf_P(PSTR("FLASHFS Settings file size: %zu\n"), settings.size());
     if (!settings) {
-        Serial.println(F("SPIFFS Error reading settings file"));
-        return;
+        Serial.println(F("FLASHFS Error reading settings file"));
+        return false;
     }
 
     DynamicJsonDocument json(1024);
     DeserializationError err = deserializeJson(json, settings);
     settings.close();
     if (err) {
-        Serial.print(F("SPIFFS Error parsing settings json file: "));
+        Serial.print(F("FLASHFS Error parsing settings json file: "));
         Serial.println(err.c_str());
-        return;
+        return false;
     }
 
     JsonObject root = json.as<JsonObject>();
@@ -279,9 +285,7 @@ void Settings::readSettings()
        JsonObject buttonObject = root[F("button")];
        if (buttonObject.containsKey(F("pin"))) {
            uint8_t btnPin = buttonObject[F("pin")];
-           if (btnPin != 0) {
-               buttonSettings.pin = btnPin;
-           }
+           buttonSettings.pin = btnPin;
        }
        if (buttonObject.containsKey(F("type"))) {
            buttonSettings.type = buttonObject[F("type")];
@@ -298,37 +302,40 @@ void Settings::readSettings()
     if (root.containsKey(F("activeEffect"))) {
         generalSettings.activeEffect = root[F("activeEffect")];
     }
+    return true;
 }
 
-void Settings::readEffects()
+bool Settings::readEffects()
 {
-    bool effectsExists = SPIFFS.exists(effectsFileName);
-    Serial.printf_P(PSTR("SPIFFS Effects file exists: %s\n"), effectsExists ? PSTR("true") : PSTR("false"));
+    bool effectsExists = FLASHFS.exists(effectsFileName);
+    Serial.printf_P(PSTR("FLASHFS Effects file exists: %s\n"), effectsExists ? PSTR("true") : PSTR("false"));
     if (!effectsExists) {
-//        SaveEffects();
-        return;
+        effectsManager->processAllEffects();
+        saveEffects();
+        return false;
     }
 
-    File effects = SPIFFS.open(effectsFileName, "r");
-    Serial.printf_P(PSTR("SPIFFS Effects file size: %zu\n"), effects.size());
+    File effects = FLASHFS.open(effectsFileName, "r");
+    Serial.printf_P(PSTR("FLASHFS Effects file size: %zu\n"), effects.size());
     if (!effects) {
-        Serial.println(F("SPIFFS Error reading effects file"));
-        return;
+        Serial.println(F("FLASHFS Error reading effects file"));
+        return false;
     }
 
     DynamicJsonDocument json(serializeSize);
     DeserializationError err = deserializeJson(json, effects);
     effects.close();
     if (err) {
-        Serial.print(F("SPIFFS Error parsing effects json file: "));
+        Serial.print(F("FLASHFS Error parsing effects json file: "));
         Serial.println(err.c_str());
-        return;
+        return false;
     }
 
     JsonArray root = json.as<JsonArray>();
     for (JsonObject effect : root) {
         effectsManager->processEffectSettings(effect);
     }
+    return true;
 }
 
 void Settings::buildSettingsJson(JsonObject &root)
